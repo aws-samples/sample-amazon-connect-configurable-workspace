@@ -134,3 +134,8 @@ To remove all deployed resources:
 ## Support
 
 For issues or questions, please reach out to your designated AWS point of contact.
+
+## Authors
+Dilin Joy
+Prashanth Krishnamurthy
+Ramprasad Srirama
