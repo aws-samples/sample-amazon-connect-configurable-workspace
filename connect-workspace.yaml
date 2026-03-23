@@ -1,0 +1,52 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create Amazon Connect Workspace for Operational Data Table
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: Amazon Connect Instance ARN
+
+  WorkspaceViewArn:
+    Type: String
+    Description: ARN of the Workspace View to associate with the workspace
+
+Resources:
+  OperationalDataTableWorkspace:
+    Type: AWS::Connect::Workspace
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: !Sub
+        - Operational Data Table Workspace-${UUID}
+        - UUID: !Select
+            - 0
+            - !Split
+              - '-'
+              - !Select
+                - 2
+                - !Split
+                  - /
+                  - !Ref AWS::StackId
+      Title: Operational Patient Data Management
+      Description: Workspace for managing operational patient data tables and workflows
+      Visibility: ALL
+      Pages:
+        - Page: connect:HOME
+          ResourceArn: !Ref WorkspaceViewArn
+          InputData: '{}'
+          Slug: ''
+      Tags:
+        - Key: Purpose
+          Value: OperationalDataTable
+        - Key: Environment
+          Value: Production
+
+Outputs:
+  WorkspaceId:
+    Description: The ID of the created workspace
+    Value: !Ref OperationalDataTableWorkspace
+
+  WorkspaceArn:
+    Description: The ARN of the created workspace
+    Value: !GetAtt OperationalDataTableWorkspace.Arn

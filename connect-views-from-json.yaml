@@ -1,0 +1,184 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create Connect Views using CLI with JSON files'
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: Amazon Connect Instance ARN
+
+Resources:
+  ViewCreatorKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for ViewCreator Lambda and SQS encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM policies
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Lambda to use the key
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+          - Sid: Allow SQS to use the key
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+            Resource: '*'
+
+  ViewCreatorDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'view-creator-dlq-${AWS::StackName}'
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: 300
+      KmsMasterKeyId: !GetAtt ViewCreatorKMSKey.Arn
+
+  ViewCreatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub 
+            - 'ConnectViewPolicy-${UUID}'
+            - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - connect:CreateView
+                  - connect:DeleteView
+                Resource: !Sub "${ConnectInstanceArn}/*"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ViewCreatorDLQ.Arn
+
+  ViewCreatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt ViewCreatorRole.Arn
+      ReservedConcurrentExecutions: 5
+      DeadLetterConfig:
+        TargetArn: !GetAtt ViewCreatorDLQ.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  connect = boto3.client('connect')
+                  instance_id = event['ResourceProperties']['InstanceId']
+                  
+                  if event['RequestType'] == 'Create':
+                      # Parse content JSON
+                      content = json.loads(event['ResourceProperties']['Content'])
+                      
+                      response = connect.create_view(
+                          InstanceId=instance_id,
+                          Name=event['ResourceProperties']['Name'],
+                          Status='PUBLISHED',
+                          Content=content
+                      )
+                      print(f"Create view response: {json.dumps(response, default=str)}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'ViewId': response['View']['Id'],
+                          'ViewArn': response['View']['Arn']
+                      }, response['View']['Id'])
+                  
+                  elif event['RequestType'] == 'Delete':
+                      response = connect.delete_view(
+                          InstanceId=instance_id,
+                          ViewId=event['PhysicalResourceId']
+                      )
+                      print(f"Delete view response: {json.dumps(response, default=str)}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  OperationalDataTableView:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt ViewCreatorFunction.Arn
+      InstanceId: !Select [1, !Split ['/', !Ref ConnectInstanceArn]]
+      Name: !Sub 
+        - "Operational Data Table-${UUID}"
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Content: !Sub |
+        {
+          "Actions": [
+            "Submit",
+            "EndGuide"
+          ],
+          "Template": "{\"Head\":{\"Configuration\":{\"Layout\":{\"Columns\":[12]}},\"Integrations\":[{\"Name\":\"OperationalDataTable\",\"IntegrationType\":\"Tool\",\"InvocationBehavior\":{\"InvocationType\":\"IMMEDIATE\",\"RefreshBehavior\":{\"EnableRefresh\":true,\"RefreshIntervalMs\":5000}},\"Props\":{\"InputData\":{},\"ToolName\":\"aws_custom_flows__4a783629-a17b-416e-af0b-d29c978f4a20_$LATEST\"}}],\"Title\":\"Operational Patient Data Table\"},\"Body\":[{\"_id\":\"Form_1764906849193\",\"Type\":\"Form\",\"Props\":{\"HideBorder\":true},\"Content\":[{\"_id\":\"Dropdown_1765229057613\",\"Type\":\"Dropdown\",\"Props\":{\"Label\":\"Line Of Business\",\"Name\":\"Line_Of_Business\",\"DefaultValue\":[\"$.Line_Of_Business\"],\"Options\":[{\"Label\":\"Urgent Care of ASD\",\"Value\":\"Urgent Care of ASD\"},{\"Label\":\"Primary Care of ABC\",\"Value\":\"Primary Care of ABC\"},{\"Label\":\"ZXC Hospital\",\"Value\":\"ZXC Hospital\"}],\"MultiSelect\":false,\"Clearable\":true,\"Required\":false,\"Disabled\":false},\"Content\":[]},{\"_id\":\"Dropdown_1765229050843\",\"Type\":\"Dropdown\",\"Props\":{\"Label\":\"Location\",\"Name\":\"Location\",\"DefaultValue\":[\"$.Location\"],\"Options\":{\"Conditions\":[{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765229057613\",\"ElementByValue\":\"Urgent Care of ASD\"}},\"Result\":[{\"Label\":\"WVN\",\"Value\":\"WVN\"},{\"Label\":\"WVS\",\"Value\":\"WVS\"},{\"Label\":\"WVE\",\"Value\":\"WVE\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"0-Dropdown_1765229050843-Options\"},{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765229057613\",\"ElementByValue\":\"Primary Care of ABC\"}},\"Result\":[{\"Label\":\"WVN\",\"Value\":\"WVN\"},{\"Label\":\"WVS\",\"Value\":\"WVS\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"1-Dropdown_1765229050843-Options\"},{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765229057613\",\"ElementByValue\":\"ZXC Hospital\"}},\"Result\":[{\"Label\":\"WVW\",\"Value\":\"WVW\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"2-Dropdown_1765229050843-Options\"}],\"Fallback\":[{\"Label\":\"Label 1\",\"Value\":\"Option 1\"},{\"Label\":\"Label 2\",\"Value\":\"Option 2\"},{\"Label\":\"Label 3\",\"Value\":\"Option 3\"}]},\"MultiSelect\":false,\"Clearable\":true,\"Required\":false,\"Disabled\":false},\"Content\":[]},{\"_id\":\"Table_1764906877293\",\"Type\":\"Table\",\"Props\":{\"Header\":\"Patient Operations\",\"Name\":\"Patient_Operations\",\"Description\":\"An inventory and personnel view of all patient-related operational data\",\"Items\":\"$.#OperationalDataTable.ViewTableRows\",\"Filterable\":true,\"ItemsPerPage\":0,\"Columns\":\"$.DataTableColumns\",\"ColumnWidth\":\"flexible\",\"TableAction\":\"Submit\",\"Actions\":\"$.DataTableActions\"},\"Content\":[]},{\"_id\":\"Container_1765316509248\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[{\"_id\":\"SubmitButton_1764906849193\",\"Type\":\"SubmitButton\",\"Props\":{\"Action\":\"Submit\",\"Label\":\"Save Changes\"},\"Content\":[]},{\"_id\":\"Button_1765316177839\",\"Type\":\"Button\",\"Props\":{\"Variant\":\"normal\",\"IconName\":\"\",\"IconAlign\":\"left\",\"Action\":\"EndGuide\",\"Disabled\":false},\"Content\":[\"End Guide\"]}],\"Configuration\":{\"Style\":{\"--container-padding-top\":\"0px\",\"--container-padding-bottom\":\"0px\"},\"Layout\":{\"Columns\":[\"1\",\"1\",\"10\"],\"Align\":\"center\"}}},{\"_id\":\"Container_1765312464607\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[],\"Configuration\":{\"Layout\":{\"Columns\":12}}},{\"_id\":\"Container_1765247311241\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[{\"_id\":\"FormInput_1765247293765\",\"Type\":\"FormInput\",\"Props\":{\"Label\":\" \",\"Name\":\"LockVersion\",\"DefaultValue\":\"$.#OperationalDataTable.LockVersion\",\"InputType\":\"text\",\"Required\":false,\"HelperText\":\"\",\"ValidationPattern\":\"\",\"Disabled\":true},\"Content\":[]}],\"Configuration\":{\"Style\":{\"--container-padding-right\":\"0px\",\"--container-padding-left\":\"0px\",\"--container-padding-bottom\":\"0px\",\"--container-padding-top\":\"0px\"},\"Layout\":{\"Columns\":[\"5\",\"4\",\"3\"]}}}]}]}"
+        }
+
+  OperationalDataTableWriteErrorView:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt ViewCreatorFunction.Arn
+      InstanceId: !Select [1, !Split ['/', !Ref ConnectInstanceArn]]
+      Name: !Sub 
+        - "Operational Data Table Write Error-${UUID}"
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Content: !Sub |
+        {
+          "Actions": [
+            "Submit",
+            "EndGuide"
+          ],
+          "Template": "{\"Head\":{\"Configuration\":{\"Layout\":{\"Columns\":\"12\"}},\"Integrations\":[{\"Name\":\"OperationalDataTable\",\"IntegrationType\":\"Tool\",\"InvocationBehavior\":{\"InvocationType\":\"IMMEDIATE\",\"RefreshBehavior\":{\"EnableRefresh\":true,\"RefreshIntervalMs\":5000}},\"Props\":{\"InputData\":{},\"ToolName\":\"aws_custom_flows__4a783629-a17b-416e-af0b-d29c978f4a20_$LATEST\"}}],\"Title\":\"Operational Patient Data Table View Write Error\"},\"Body\":[{\"_id\":\"Alert_1765248059079\",\"Type\":\"Alert\",\"Props\":{\"type\":\"error\",\"level\":\"page\",\"heading\":\"Error\",\"dismissible\":true},\"Content\":[\"Previous edits not saved\"]},{\"_id\":\"Form_1765248146231\",\"Type\":\"Form\",\"Props\":{\"HideBorder\":true},\"Content\":[{\"_id\":\"Dropdown_1765248249535\",\"Type\":\"Dropdown\",\"Props\":{\"Label\":\"Line Of Business\",\"Name\":\"Line_Of_Business\",\"DefaultValue\":[\"\"],\"Options\":[{\"Label\":\"Urgent Care of ASD\",\"Value\":\"Urgent Care of ASD\"},{\"Label\":\"Primary Care of ABC\",\"Value\":\"Primary Care of ABC\"},{\"Label\":\"ZXC Hospital\",\"Value\":\"ZXC Hospital\"}],\"MultiSelect\":false,\"Clearable\":true,\"Required\":false,\"Disabled\":false},\"Content\":[]},{\"_id\":\"Dropdown_1765248248320\",\"Type\":\"Dropdown\",\"Props\":{\"Label\":\"Location\",\"Name\":\"Location\",\"DefaultValue\":[\"\"],\"Options\":{\"Conditions\":[{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765248249535\",\"ElementByValue\":\"Urgent Care of ASD\"}},\"Result\":[{\"Label\":\"WVN\",\"Value\":\"WVN\"},{\"Label\":\"WVS\",\"Value\":\"WVS\"},{\"Label\":\"WVE\",\"Value\":\"WVE\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"0-Dropdown_1765248248320-Options\"},{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765248249535\",\"ElementByValue\":\"Primary Care of ABC\"}},\"Result\":[{\"Label\":\"WVN\",\"Value\":\"WVN\"},{\"Label\":\"WVS\",\"Value\":\"WVS\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"1-Dropdown_1765248248320-Options\"},{\"Condition\":{\"Equals\":{\"ElementByKey\":\"Dropdown_1765248249535\",\"ElementByValue\":\"ZXC Hospital\"}},\"Result\":[{\"Label\":\"WVW\",\"Value\":\"WVW\"},{\"Label\":\"All\",\"Value\":\"All\"}],\"id\":\"2-Dropdown_1765248248320-Options\"}],\"Fallback\":[{\"Label\":\"Label 1\",\"Value\":\"Option 1\"},{\"Label\":\"Label 2\",\"Value\":\"Option 2\"},{\"Label\":\"Label 3\",\"Value\":\"Option 3\"}]},\"MultiSelect\":false,\"Clearable\":true,\"Required\":false,\"Disabled\":false},\"Content\":[]},{\"_id\":\"Table_1765248320681\",\"Type\":\"Table\",\"Props\":{\"Header\":\"Patient Operations\",\"Name\":\"Patient_Operations\",\"Description\":\"An inventory and personnel view of all patient-related operational data\",\"Items\":\"$.#OperationalDataTable.ViewTableRows\",\"Filterable\":true,\"ItemsPerPage\":0,\"Columns\":\"$.DataTableColumns\",\"ColumnWidth\":\"flexible\",\"TableAction\":\"Submit\",\"Actions\":\"$.DataTableActions\"},\"Content\":[]},{\"_id\":\"Container_1765316052693\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[{\"_id\":\"SubmitButton_1765248146231\",\"Type\":\"SubmitButton\",\"Props\":{\"Action\":\"Submit\",\"Label\":\"Save Changes\"},\"Content\":[]},{\"_id\":\"Button_1765315790658\",\"Type\":\"Button\",\"Props\":{\"Variant\":\"normal\",\"IconName\":\"\",\"IconAlign\":\"left\",\"Action\":\"EndGuide\",\"Disabled\":false},\"Content\":[\"End Guide\"]}],\"Configuration\":{\"Style\":{\"--container-padding-top\":\"0px\",\"--container-padding-bottom\":\"0px\"},\"Layout\":{\"Columns\":[\"1\",\"1\",\"10\"],\"Align\":\"center\"}}},{\"_id\":\"Container_1765312146451\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[],\"Configuration\":{\"Layout\":{\"Columns\":12}}},{\"_id\":\"Container_1765248158405\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":true},\"Content\":[{\"_id\":\"FormInput_1765248167282\",\"Type\":\"FormInput\",\"Props\":{\"Label\":\" \",\"Name\":\"LockVersion\",\"DefaultValue\":\"$.#OperationalDataTable.LockVersion\",\"InputType\":\"text\",\"Required\":false,\"HelperText\":\"\",\"ValidationPattern\":\"\",\"Disabled\":true},\"Content\":[]}],\"Configuration\":{\"Style\":{\"--container-heading-color\":\"#ffffff\",\"--container-heading-font-size\":\"0rem\",\"--container-padding-left\":\"0px\",\"--container-padding-right\":\"0px\",\"--container-padding-bottom\":\"0px\",\"--container-padding-top\":\"0px\"},\"Layout\":{\"Columns\":[\"5\",\"4\",\"3\"]}}}]}]}"
+        }
+
+Outputs:
+  ViewId:
+    Value: !GetAtt OperationalDataTableView.ViewId
+  ViewArn:
+    Value: !GetAtt OperationalDataTableView.ViewArn
+  ViewName:
+    Value: !Sub 
+      - "Operational Data Table-${UUID}"
+      - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+  WriteErrorViewId:
+    Value: !GetAtt OperationalDataTableWriteErrorView.ViewId
+  WriteErrorViewArn:
+    Value: !GetAtt OperationalDataTableWriteErrorView.ViewArn
+  WriteErrorViewName:
+    Value: !Sub 
+      - "Operational Data Table Write Error-${UUID}"
+      - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+  ViewCreatorFunctionArn:
+    Value: !GetAtt ViewCreatorFunction.Arn

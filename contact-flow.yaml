@@ -1,0 +1,88 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Amazon Connect Contact Flow for Operational Patient Data Table'
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: Amazon Connect Instance ARN
+
+  DataTableId:
+    Type: String
+    Description: Operational Patient Data Table ID
+    
+  DataTableName:
+    Type: String
+    Description: Operational Patient Data Table Name
+  
+  PrimaryValueGroupsMapperArn:
+    Type: String
+    Description: ARN of the Primary Value Groups Mapper Lambda function
+
+  WriteTransformArn:
+    Type: String
+    Description: ARN of the Write Transform Lambda function
+  
+  OperationalDataTableViewArn:
+    Type: String
+    Description: ARN of the Operational Data Table View
+  
+  OperationalDataTableWriteErrorViewArn:
+    Type: String
+    Description: ARN of the Operational Data Table Write Error View
+    
+  OperationalDataTableViewName:
+    Type: String
+    Description: Name of the Operational Data Table View
+    
+  OperationalDataTableWriteErrorViewName:
+    Type: String
+    Description: Name of the Operational Data Table Write Error View
+    
+  PrimaryValueGroupsMapperName:
+    Type: String
+    Description: Name of the Primary Value Groups Mapper Lambda function
+    
+  WriteTransformName:
+    Type: String
+    Description: Name of the Write Transform Lambda function
+
+Resources:
+  OperationalPatientContactFlow:
+    Type: AWS::Connect::ContactFlow
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: !Sub 
+        - "Operational Patient Data Table Flow-${UUID}"
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Type: CONTACT_FLOW
+      Content: !Sub
+        - "{\"Version\":\"2019-10-30\",\"StartAction\":\"0ab573eb-0921-4d54-894e-0fd81c97587c\",\"Metadata\":{\"entryPointPosition\":{\"x\":40,\"y\":40},\"ActionMetadata\":{\"0ab573eb-0921-4d54-894e-0fd81c97587c\":{\"position\":{\"x\":119,\"y\":39}},\"MapPrimaryValues\":{\"position\":{\"x\":341,\"y\":43},\"isFriendlyName\":true,\"parameters\":{\"LambdaFunctionARN\":{\"displayName\":\"${PrimaryValueGroupsMapperName}\"},\"LambdaInvocationAttributes\":{\"Line_Of_Business\":{\"useDynamic\":true},\"Location\":{\"useDynamic\":true}}},\"dynamicMetadata\":{\"Line_Of_Business\":true,\"Location\":true}},\"4b4810a4-998b-49c1-bb2c-c81accd95d44\":{\"position\":{\"x\":563,\"y\":45},\"parameters\":{\"Attributes\":{\"PrimaryValueGroups\":{\"useDynamic\":true}}},\"dynamicParams\":[\"PrimaryValueGroups\"]},\"8370d216-bc21-4e18-8b55-f27c1b28cf17\":{\"position\":{\"x\":1008,\"y\":52},\"parameters\":{\"ViewResource\":{\"Id\":{\"displayName\":\"${OperationalDataTableViewName}\"}},\"InvocationTimeLimitSeconds\":{\"unit\":1},\"ViewData\":{\"DataTableActions\":{\"useJson\":true}}}},\"51b0709a-0299-4f00-b541-f90ffd0951a6\":{\"position\":{\"x\":785,\"y\":47},\"conditionMetadata\":[{\"id\":\"58f4c83d-effa-4f67-ba2b-80971c068cb6\",\"operator\":{\"name\":\"Equals\",\"value\":\"Equals\",\"shortDisplay\":\"=\"},\"value\":\"true\"}]},\"d96d1618-253d-4d8b-ac0f-68e33caf5186\":{\"position\":{\"x\":1008,\"y\":365},\"parameters\":{\"ViewResource\":{\"Id\":{\"displayName\":\"${OperationalDataTableWriteErrorViewName}\"}},\"InvocationTimeLimitSeconds\":{\"unit\":1},\"ViewData\":{\"DataTableActions\":{\"useJson\":true}}}},\"6d3ecf1d-4674-47eb-b423-0301443ff668\":{\"position\":{\"x\":1254,\"y\":50},\"dynamicParams\":[]},\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\":{\"position\":{\"x\":1242,\"y\":648}},\"DataTableWriteTransform\":{\"position\":{\"x\":1473,\"y\":48},\"isFriendlyName\":true,\"parameters\":{\"LambdaFunctionARN\":{\"displayName\":\"${WriteTransformName}\"},\"LambdaInvocationAttributes\":{\"ViewResults\":{\"useJson\":true}}},\"dynamicMetadata\":{\"ViewResults\":false}},\"5dc6f1b6-0d6f-42df-917c-357280e3ff1e\":{\"position\":{\"x\":2142,\"y\":-190},\"dynamicParams\":[]},\"1551d5af-fefe-45c5-91e7-372dbd958225\":{\"position\":{\"x\":2439,\"y\":-190},\"dynamicParams\":[]},\"83c983ab-a6f4-47a1-a85b-b5b9db96dcbf\":{\"position\":{\"x\":1698,\"y\":-184},\"conditions\":[],\"conditionMetadata\":[{\"id\":\"ff984fa1-b16a-4483-ba78-1aa4e54da09b\",\"operator\":{\"name\":\"Equals\",\"value\":\"Equals\",\"shortDisplay\":\"=\"},\"value\":\"true\"}]},\"4ef098f3-cdb3-45e6-a208-99e000112127\":{\"position\":{\"x\":1924,\"y\":53},\"parameters\":{\"LockVersion\":{\"useDynamic\":true},\"DataTableId\":{\"displayName\":\"${DataTableName}\"},\"DataTableUpsertAttributes\":{\"useDynamic\":true}}}},\"Annotations\":[]},\"Actions\":[{\"Parameters\":{\"FlowLoggingBehavior\":\"Enabled\"},\"Identifier\":\"0ab573eb-0921-4d54-894e-0fd81c97587c\",\"Type\":\"UpdateFlowLoggingBehavior\",\"Transitions\":{\"NextAction\":\"MapPrimaryValues\"}},{\"Parameters\":{\"LambdaFunctionARN\":\"${PrimaryValueGroupsMapperArn}\",\"InvocationTimeLimitSeconds\":\"8\",\"InvocationType\":\"SYNCHRONOUS\",\"LambdaInvocationAttributes\":{\"Line_Of_Business\":\"$.Attributes.Line_Of_Business\",\"Location\":\"$.Attributes.Location\"},\"ResponseValidation\":{\"ResponseType\":\"JSON\"}},\"Identifier\":\"MapPrimaryValues\",\"Type\":\"InvokeLambdaFunction\",\"Transitions\":{\"NextAction\":\"4b4810a4-998b-49c1-bb2c-c81accd95d44\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"Attributes\":{\"PrimaryValueGroups\":\"$.External.PrimaryValueConfig\"},\"TargetContact\":\"Current\"},\"Identifier\":\"4b4810a4-998b-49c1-bb2c-c81accd95d44\",\"Type\":\"UpdateContactAttributes\",\"Transitions\":{\"NextAction\":\"51b0709a-0299-4f00-b541-f90ffd0951a6\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"ViewResource\":{\"Id\":\"${OperationalDataTableViewArn}\"},\"InvocationTimeLimitSeconds\":\"900\",\"ViewData\":{\"DataTableColumns\":\"$.External.ViewTableColumns\",\"DataTableActions\":[],\"Line_Of_Business\":\"$.Attributes.Line_Of_Business\",\"Location\":\"$.Attributes.Location\"}},\"Identifier\":\"8370d216-bc21-4e18-8b55-f27c1b28cf17\",\"Type\":\"ShowView\",\"Transitions\":{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"Conditions\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"EndGuide\"]}},{\"NextAction\":\"6d3ecf1d-4674-47eb-b423-0301443ff668\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"Submit\"]}}],\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingCondition\"},{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"},{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"TimeLimitExceeded\"}]}},{\"Parameters\":{\"ComparisonValue\":\"$.Attributes.ErrorWritingDataTable\"},\"Identifier\":\"51b0709a-0299-4f00-b541-f90ffd0951a6\",\"Type\":\"Compare\",\"Transitions\":{\"NextAction\":\"8370d216-bc21-4e18-8b55-f27c1b28cf17\",\"Conditions\":[{\"NextAction\":\"d96d1618-253d-4d8b-ac0f-68e33caf5186\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"true\"]}}],\"Errors\":[{\"NextAction\":\"8370d216-bc21-4e18-8b55-f27c1b28cf17\",\"ErrorType\":\"NoMatchingCondition\"}]}},{\"Parameters\":{\"ViewResource\":{\"Id\":\"${OperationalDataTableWriteErrorViewArn}\"},\"InvocationTimeLimitSeconds\":\"900\",\"ViewData\":{\"DataTableColumns\":\"$.External.ViewTableColumns\",\"DataTableActions\":[]}},\"Identifier\":\"d96d1618-253d-4d8b-ac0f-68e33caf5186\",\"Type\":\"ShowView\",\"Transitions\":{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"Conditions\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"EndGuide\"]}},{\"NextAction\":\"6d3ecf1d-4674-47eb-b423-0301443ff668\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"Submit\"]}}],\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingCondition\"},{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"},{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"TimeLimitExceeded\"}]}},{\"Parameters\":{\"Attributes\":{\"Line_Of_Business\":\"$.Views.ViewResultData.Line_Of_Business.0\",\"Location\":\"$.Views.ViewResultData.Location.0\",\"DataTableLockVersion\":\"$.Views.ViewResultData.LockVersion\"},\"TargetContact\":\"Current\"},\"Identifier\":\"6d3ecf1d-4674-47eb-b423-0301443ff668\",\"Type\":\"UpdateContactAttributes\",\"Transitions\":{\"NextAction\":\"DataTableWriteTransform\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{},\"Identifier\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"Type\":\"DisconnectParticipant\",\"Transitions\":{}},{\"Parameters\":{\"LambdaFunctionARN\":\"${WriteTransformArn}\",\"InvocationTimeLimitSeconds\":\"3\",\"InvocationType\":\"SYNCHRONOUS\",\"LambdaInvocationAttributes\":{\"ViewResults\":{\"Patient_Businesses\":\"$.Views.ViewResultData.Patient_Operations\",\"Primary_Keys\":{\"0\":\"Line_Of_Business\",\"1\":\"Location\"}}},\"ResponseValidation\":{\"ResponseType\":\"JSON\"}},\"Identifier\":\"DataTableWriteTransform\",\"Type\":\"InvokeLambdaFunction\",\"Transitions\":{\"NextAction\":\"83c983ab-a6f4-47a1-a85b-b5b9db96dcbf\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"Attributes\":{\"ErrorWritingDataTable\":\"true\"},\"TargetContact\":\"Current\"},\"Identifier\":\"5dc6f1b6-0d6f-42df-917c-357280e3ff1e\",\"Type\":\"UpdateContactAttributes\",\"Transitions\":{\"NextAction\":\"MapPrimaryValues\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"Attributes\":{\"ErrorWritingDataTable\":\"false\"},\"TargetContact\":\"Current\"},\"Identifier\":\"1551d5af-fefe-45c5-91e7-372dbd958225\",\"Type\":\"UpdateContactAttributes\",\"Transitions\":{\"NextAction\":\"MapPrimaryValues\",\"Errors\":[{\"NextAction\":\"32fc9055-bc1a-4a2a-97ef-24a9fc2325e2\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"ComparisonValue\":\"$.External.ShouldUpdate\"},\"Identifier\":\"83c983ab-a6f4-47a1-a85b-b5b9db96dcbf\",\"Type\":\"Compare\",\"Transitions\":{\"NextAction\":\"MapPrimaryValues\",\"Conditions\":[{\"NextAction\":\"4ef098f3-cdb3-45e6-a208-99e000112127\",\"Condition\":{\"Operator\":\"Equals\",\"Operands\":[\"true\"]}}],\"Errors\":[{\"NextAction\":\"MapPrimaryValues\",\"ErrorType\":\"NoMatchingCondition\"}]}},{\"Parameters\":{\"LockVersion\":\"$.Attributes.DataTableLockVersion\",\"DataTableId\":\"${DataTableId}\",\"DataTableUpsertAttributes\":\"$.External.OperationalDataTableViewTableOutputTransformResponse\"},\"Identifier\":\"4ef098f3-cdb3-45e6-a208-99e000112127\",\"Type\":\"UpsertDataTableValues\",\"Transitions\":{\"NextAction\":\"1551d5af-fefe-45c5-91e7-372dbd958225\",\"Errors\":[{\"NextAction\":\"5dc6f1b6-0d6f-42df-917c-357280e3ff1e\",\"ErrorType\":\"NoMatchingError\"}]}}]}"
+        - PrimaryValueGroupsMapperArn: !Ref PrimaryValueGroupsMapperArn
+          WriteTransformArn: !Ref WriteTransformArn
+          OperationalDataTableViewArn: !Ref OperationalDataTableViewArn
+          OperationalDataTableWriteErrorViewArn: !Ref OperationalDataTableWriteErrorViewArn
+          DataTableId: !Ref DataTableId
+          PrimaryValueGroupsMapperName: !Ref PrimaryValueGroupsMapperName
+          WriteTransformName: !Ref WriteTransformName
+          DataTableName: !Ref DataTableName
+          OperationalDataTableWriteErrorViewArn: !Ref OperationalDataTableWriteErrorViewArn
+          DataTableId: !Ref DataTableId
+          OperationalDataTableViewName: !Ref OperationalDataTableViewName
+          OperationalDataTableWriteErrorViewName: !Ref OperationalDataTableWriteErrorViewName
+          
+Outputs:
+  ContactFlowId:
+    Description: The ID of the created contact flow
+    Value: !Ref OperationalPatientContactFlow
+  
+  ContactFlowArn:
+    Description: The ARN of the created contact flow
+    Value: !GetAtt OperationalPatientContactFlow.ContactFlowArn
+    
+  ContactFlowName:
+    Description: The name of the created contact flow
+    Value: !Sub 
+      - "Operational Patient Data Table Flow-${UUID}"
+      - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]

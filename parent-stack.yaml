@@ -1,0 +1,164 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Parent CloudFormation template for Operational Patient Queue Data Table infrastructure'
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: The Amazon Connect Instance ARN
+    Default: 'YOUR_CONNECT_INSTANCE_ARN'
+
+  S3BucketName:
+    Type: String
+    Description: S3 bucket name containing the CloudFormation templates
+    Default: 'YOUR_S3_BUCKET'
+
+  S3Region:
+    Type: String
+    Description: AWS region where the S3 bucket is located
+    Default: 'YOUR_REGION'
+
+  S3KeyPrefix:
+    Type: String
+    Description: S3 key prefix for template files (optional)
+    Default: ''
+
+Resources:
+  DataTableStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}datatable-cft.yaml'
+      Parameters:
+        ConnectInstanceId: !Ref ConnectInstanceArn
+      Tags:
+        - Key: 'Component'
+          Value: 'DataTable'
+
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: DataTableStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}lambda.yaml'
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+      Tags:
+        - Key: 'Component'
+          Value: 'Lambda'
+
+  ContactFlowModuleStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}contact-flow-module.yaml'
+      Parameters:
+        ConnectInstanceId: !Ref ConnectInstanceArn
+        DataTableId: !GetAtt DataTableStack.Outputs.DataTableId
+        DataTableName: !GetAtt DataTableStack.Outputs.DataTableName
+        PrimaryKeyGroupsParserArn: !GetAtt LambdaStack.Outputs.LambdaFunctionArn
+        ListTransformArn: !GetAtt LambdaStack.Outputs.OperationalDataTableLambdaArn
+        PrimaryKeyGroupsParserName: !GetAtt LambdaStack.Outputs.LambdaFunctionName
+        ListTransformName: !GetAtt LambdaStack.Outputs.OperationalDataTableLambdaName
+      Tags:
+        - Key: 'Component'
+          Value: 'ContactFlowModule'
+
+  ConnectViewsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ContactFlowModuleStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}connect-views-from-json.yaml'
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+      Tags:
+        - Key: 'Component'
+          Value: 'ConnectViews'
+
+  ContactFlowStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ConnectViewsStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}contact-flow.yaml'
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+        DataTableId: !GetAtt DataTableStack.Outputs.DataTableId
+        DataTableName: !GetAtt DataTableStack.Outputs.DataTableName
+        PrimaryValueGroupsMapperArn: !GetAtt LambdaStack.Outputs.PrimaryValueGroupsMapperArn
+        WriteTransformArn: !GetAtt LambdaStack.Outputs.WriteTransformArn
+        OperationalDataTableViewArn: !GetAtt ConnectViewsStack.Outputs.ViewArn
+        OperationalDataTableWriteErrorViewArn: !GetAtt ConnectViewsStack.Outputs.WriteErrorViewArn
+        OperationalDataTableViewName: !GetAtt ConnectViewsStack.Outputs.ViewName
+        OperationalDataTableWriteErrorViewName: !GetAtt ConnectViewsStack.Outputs.WriteErrorViewName
+        PrimaryValueGroupsMapperName: !GetAtt LambdaStack.Outputs.PrimaryValueGroupsMapperName
+        WriteTransformName: !GetAtt LambdaStack.Outputs.WriteTransformName
+      Tags:
+        - Key: 'Component'
+          Value: 'ContactFlow'
+
+  WorkspaceViewStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ContactFlowStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}connect-workspace-view.yaml'
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+        ContactFlowArn: !GetAtt ContactFlowStack.Outputs.ContactFlowArn
+        ContactFlowName: !GetAtt ContactFlowStack.Outputs.ContactFlowName
+        ViewCreatorFunctionArn: !GetAtt ConnectViewsStack.Outputs.ViewCreatorFunctionArn
+      Tags:
+        - Key: 'Component'
+          Value: 'WorkspaceView'
+
+  WorkspaceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: WorkspaceViewStack
+    Properties:
+      TemplateURL: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/${S3KeyPrefix}connect-workspace.yaml'
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+        WorkspaceViewArn: !Sub '${WorkspaceViewStack.Outputs.WorkspaceViewArn}:$LATEST'
+      Tags:
+        - Key: 'Component'
+          Value: 'Workspace'
+
+Outputs:
+  DataTableArn:
+    Description: 'ARN of the Operational Patient Queue Data Table'
+    Value: !GetAtt DataTableStack.Outputs.DataTableArn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataTableArn'
+
+  LambdaFunctionArns:
+    Description: 'ARNs of all Lambda functions'
+    Value: !Sub 
+      - 'Parser: ${ParserArn}, ListTransform: ${ListArn}, Mapper: ${MapperArn}, WriteTransform: ${WriteArn}'
+      - ParserArn: !GetAtt LambdaStack.Outputs.LambdaFunctionArn
+        ListArn: !GetAtt LambdaStack.Outputs.OperationalDataTableLambdaArn
+        MapperArn: !GetAtt LambdaStack.Outputs.PrimaryValueGroupsMapperArn
+        WriteArn: !GetAtt LambdaStack.Outputs.WriteTransformArn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArns'
+
+  ContactFlowModuleArn:
+    Description: 'ARN of the Contact Flow Module'
+    Value: !GetAtt ContactFlowModuleStack.Outputs.ContactFlowModuleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-ContactFlowModuleArn'
+
+  WorkspaceViewArn:
+    Description: 'ARN of the Workspace View'
+    Value: !GetAtt WorkspaceViewStack.Outputs.WorkspaceViewArn
+    Export:
+      Name: !Sub '${AWS::StackName}-WorkspaceViewArn'
+
+  WorkspaceArn:
+    Description: 'ARN of the Connect Workspace'
+    Value: !GetAtt WorkspaceStack.Outputs.WorkspaceArn
+    Export:
+      Name: !Sub '${AWS::StackName}-WorkspaceArn'
+
+  DeploymentStatus:
+    Description: 'Deployment completion status'
+    Value: 'All components deployed successfully'
+    Export:
+      Name: !Sub '${AWS::StackName}-DeploymentStatus'

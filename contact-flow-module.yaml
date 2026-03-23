@@ -1,0 +1,62 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Amazon Connect Contact Flow Module for Read Operation Data Table'
+
+Parameters:
+  ConnectInstanceId:
+    Type: String
+    Description: The Amazon Connect Instance ID
+
+  DataTableId:
+    Type: String
+    Description: The Data Table ID to reference in the contact flow
+    
+  DataTableName:
+    Type: String
+    Description: The Data Table Name to display in the contact flow
+    
+  PrimaryKeyGroupsParserArn:
+    Type: String
+    Description: ARN of the Primary Key Groups Parser Lambda function
+    
+  ListTransformArn:
+    Type: String
+    Description: ARN of the List Transform Lambda function
+    
+  PrimaryKeyGroupsParserName:
+    Type: String
+    Description: Name of the Primary Key Groups Parser Lambda function
+    
+  ListTransformName:
+    Type: String
+    Description: Name of the List Transform Lambda function
+
+Resources:
+  ReadOperationDataTableModule:
+    Type: AWS::Connect::ContactFlowModule
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      Name: !Sub 
+        - 'readoperationdatatablemodule-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Description: 'Contact flow module for reading operational data table'
+      Content: !Sub 
+        - "{\"Version\":\"2019-10-30\",\"StartAction\":\"3a9fc000-02bf-428b-9df9-49a3e973ef90\",\"Metadata\":{\"entryPointPosition\":{\"x\":-18.4,\"y\":40},\"ActionMetadata\":{\"3a9fc000-02bf-428b-9df9-49a3e973ef90\":{\"position\":{\"x\":85.6,\"y\":39.2}},\"ParsePrimaryKeys\":{\"position\":{\"x\":332.8,\"y\":43.2},\"isFriendlyName\":true,\"parameters\":{\"LambdaFunctionARN\":{\"displayName\":\"${PrimaryKeyGroupsParserName}\"},\"LambdaInvocationAttributes\":{\"PKGroups\":{\"useDynamic\":true}}},\"dynamicMetadata\":{\"PKGroups\":true}},\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\":{\"position\":{\"x\":518.4,\"y\":372.8},\"parameters\":{\"ResultData\":{\"useDynamic\":true}}},\"23fb60fd-3d2c-45cc-9c95-f4b2d0094a2e\":{\"position\":{\"x\":565.6,\"y\":42.4},\"parameters\":{\"DataTableId\":{\"displayName\":\"${DataTableName}\"},\"PrimaryKeyGroups\":{\"useDynamic\":true}}},\"TransformListOutput\":{\"position\":{\"x\":790.4,\"y\":41.6},\"isFriendlyName\":true,\"parameters\":{\"LambdaFunctionARN\":{\"displayName\":\"${ListTransformName}\"}},\"dynamicMetadata\":{\"ResultData\":false}}},\"Annotations\":[]},\"Actions\":[{\"Parameters\":{\"FlowLoggingBehavior\":\"Enabled\"},\"Identifier\":\"3a9fc000-02bf-428b-9df9-49a3e973ef90\",\"Type\":\"UpdateFlowLoggingBehavior\",\"Transitions\":{\"NextAction\":\"ParsePrimaryKeys\"}},{\"Parameters\":{\"LambdaFunctionARN\":\"${PrimaryKeyGroupsParserArn}\",\"InvocationTimeLimitSeconds\":\"8\",\"InvocationType\":\"SYNCHRONOUS\",\"LambdaInvocationAttributes\":{\"PKGroups\":\"$.Attributes.PrimaryValueGroups\"},\"ResponseValidation\":{\"ResponseType\":\"JSON\"}},\"Identifier\":\"ParsePrimaryKeys\",\"Type\":\"InvokeLambdaFunction\",\"Transitions\":{\"NextAction\":\"23fb60fd-3d2c-45cc-9c95-f4b2d0094a2e\",\"Errors\":[{\"NextAction\":\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"ResultData\":\"$.External.ModuleResponse\"},\"Identifier\":\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\",\"Type\":\"EndFlowModuleExecution\",\"Transitions\":{}},{\"Parameters\":{\"DataTableId\":\"${DataTableId}\",\"PrimaryKeyGroups\":\"$.External.PKGroups\"},\"Identifier\":\"23fb60fd-3d2c-45cc-9c95-f4b2d0094a2e\",\"Type\":\"ListDataTableValues\",\"Transitions\":{\"NextAction\":\"TransformListOutput\",\"Errors\":[{\"NextAction\":\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\",\"ErrorType\":\"NoMatchingError\"}]}},{\"Parameters\":{\"LambdaFunctionARN\":\"${ListTransformArn}\",\"InvocationTimeLimitSeconds\":\"8\",\"InvocationType\":\"SYNCHRONOUS\",\"LambdaInvocationAttributes\":{\"ResultData\":\"$.DataTableList.ResultData\"},\"ResponseValidation\":{\"ResponseType\":\"JSON\"}},\"Identifier\":\"TransformListOutput\",\"Type\":\"InvokeLambdaFunction\",\"Transitions\":{\"NextAction\":\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\",\"Errors\":[{\"NextAction\":\"4e8c03b2-65e1-4c01-84b5-d5b7e0ee99de\",\"ErrorType\":\"NoMatchingError\"}]}}],\"Settings\":{\"InputParameters\":[],\"OutputParameters\":[],\"Transitions\":[{\"DisplayName\":\"Success\",\"ReferenceName\":\"Success\",\"Description\":\"\"},{\"DisplayName\":\"Error\",\"ReferenceName\":\"Error\",\"Description\":\"\"}]}}"
+        - PrimaryKeyGroupsParserName: !Ref PrimaryKeyGroupsParserName
+          ListTransformName: !Ref ListTransformName
+          DataTableName: !Ref DataTableName
+      ExternalInvocationConfiguration:
+          Enabled: true
+      State: 'active'
+      Settings: "{\"resultData\":{\"schema\":{\"type\":\"object\",\"properties\":{\"ViewTableRows\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"LockVersion\":{\"type\":\"string\"}},\"required\":[\"ViewTableRows\",\"LockVersion\"]}},\"transitions\":{\"results\":[]}}"
+      Tags:
+        - Key: 'Purpose'
+          Value: 'DataTable Operations'
+
+Outputs:
+  ContactFlowModuleArn:
+    Description: 'ARN of the Contact Flow Module'
+    Value: !GetAtt ReadOperationDataTableModule.ContactFlowModuleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-ContactFlowModuleArn'

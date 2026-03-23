@@ -1,0 +1,412 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda function for DataTable Module Primary Key Groups Parser with Connect integration'
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: The Amazon Connect Instance ARN
+
+Resources:
+  LambdaKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Lambda environment variables and SQS encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM policies
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Lambda to use the key
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+          - Sid: Allow SQS to use the key
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+            Resource: '*'
+
+  LambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 
+        - 'lambda-dlq-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: 300
+      KmsMasterKeyId: !GetAtt LambdaKMSKey.Arn
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub 
+            - 'ConnectDataTablePolicy-${UUID}'
+            - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - connect:ListDataTables
+                  - connect:DescribeDataTable
+                  - connect:CreateDataTableRecord
+                  - connect:UpdateDataTableRecord
+                  - connect:DeleteDataTableRecord
+                  - connect:ListDataTableRecords
+                  - connect:GetDataTableRecord
+                Resource: !Sub '${ConnectInstanceArn}/*'
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt LambdaDLQ.Arn
+
+  DataTableModulePrimaryKeyGroupsParser:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 
+        - 'DataTableModulePrimaryKeyGroupsParser-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Runtime: nodejs24.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+      DeadLetterConfig:
+        TargetArn: !GetAtt LambdaDLQ.Arn
+      KmsKeyArn: !GetAtt LambdaKMSKey.Arn
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log(event, JSON.stringify(event, null, 2));
+            const pkGroups = JSON.parse(event.Details.Parameters.PKGroups);
+            console.log(pkGroups, JSON.stringify(pkGroups, null, 2));            
+            return { "PKGroups": pkGroups };
+          };
+      Environment:
+        Variables:
+          CONNECT_INSTANCE_ARN: !Ref ConnectInstanceArn
+      Timeout: 6
+
+  OperationalDataTableListTransform:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 
+        - 'OperationalDataTableListTransform-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Runtime: nodejs24.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+      DeadLetterConfig:
+        TargetArn: !GetAtt LambdaDLQ.Arn
+      KmsKeyArn: !GetAtt LambdaKMSKey.Arn
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("raw event", JSON.stringify(event, null, 2)); 
+            const rows = Object.values(event.Details.Parameters.ResultData.primaryKeyGroups).reduce((acc, rows) => {
+              return [...acc, ...rows];
+            }, []);
+
+            // primary value key/value pairs, attributes key/value pairs
+            const formattedRows = rows.map((row) => {
+              const formattedRow = {};
+              row.primaryKeys.forEach((pk) => {
+                formattedRow[pk.attributeName] = pk.attributeValue;
+              });
+              row.attributes.forEach((att) => {
+                formattedRow[att.attributeName] = att.attributeValue;
+              });
+              return formattedRow;
+            });
+
+            const response = {
+              ModuleResponse: { ViewTableRows: formattedRows, LockVersion: event.Details.Parameters.ResultData.lockVersion.dataTable }
+            };
+            console.log("response", JSON.stringify(response, null, 2));
+            return response;
+          };
+      Environment:
+        Variables:
+          CONNECT_INSTANCE_ARN: !Ref ConnectInstanceArn
+      Timeout: 6
+
+  OperationalDataTablePrimaryValueGroupsMapper:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 
+        - 'OperationalDataTablePrimaryValueGroupsMapper-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Runtime: nodejs24.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+      DeadLetterConfig:
+        TargetArn: !GetAtt LambdaDLQ.Arn
+      KmsKeyArn: !GetAtt LambdaKMSKey.Arn
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("Event: ", JSON.stringify(event, null, 4));
+            const lineOfBusiness = event.Details.Parameters.Line_Of_Business;
+            const location = event.Details.Parameters.Location;
+            let response = {
+              PrimaryValueConfig: [
+              ],
+              ViewTableColumns: [
+                { "Label": "Line Of Business", Type: "text", "Id": "Line_Of_Business"},
+                { "Label": "Location", Type: "text", "Id": "Location"}
+              ],
+            };
+            if (lineOfBusiness) {
+              response.PrimaryValueConfig.push({
+                PrimaryKeyGroupName: "pg1",
+                PrimaryValues: [
+                ],
+              });
+              response.PrimaryValueConfig[0].PrimaryValues.push({Name: "Line_Of_Business", Value: lineOfBusiness});
+              if (location) {
+                response.PrimaryValueConfig[0].PrimaryValues.push({Name: "Location", Value: location});
+              }    
+            }
+
+            if (location !== "All") {
+              response.ViewTableColumns.push({ "Label": "Patients In Care", Type: "number", "Id": "Patients_In_Care", "EditableType": "input"});
+              response.ViewTableColumns.push({ "Label": "Employees Arrived Today", Type: "number", "Id": "Employees_Arrived_Today", "EditableType": "input"})
+              response.ViewTableColumns.push({ "Label": "Employees Scheduled Per Day", Type: "number", "Id": "Employees_Scheduled_Today"})
+            }
+
+            if (!location || location==="All") {
+              response.ViewTableColumns.push({ "Label": "Locations", Type: "text", "Id": "Locations"})
+            }
+
+            response = { ...response, PrimaryValueConfig: JSON.stringify(response.PrimaryValueConfig)};
+            console.log("Response: ", JSON.stringify(response, null, 4));
+            return response;
+          };
+      Environment:
+        Variables:
+          CONNECT_INSTANCE_ARN: !Ref ConnectInstanceArn
+      Timeout: 6
+
+  OperationalPatientDataTableWriteTransform:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 
+        - 'OperationalPatientDataTableWriteTransform-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Runtime: nodejs24.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+      DeadLetterConfig:
+        TargetArn: !GetAtt LambdaDLQ.Arn
+      KmsKeyArn: !GetAtt LambdaKMSKey.Arn
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("event", JSON.stringify(event, null, 2), event.Details.Parameters.ViewResults);
+            if (!event.Details.Parameters.ViewResults.Patient_Businesses) return { "OperationalDataTableViewTableOutputTransformResponse": [], "ShouldUpdate": "false" }
+            const rowsChanged = Object.values(event.Details.Parameters.ViewResults.Patient_Businesses);
+            const primaryKeySet = Object.values(event.Details.Parameters.ViewResults.Primary_Keys);
+            const primaryKeyGroups = [];
+
+            let pgCounter = 1;
+
+            rowsChanged.forEach((row) => {
+              const primaryAttributes = [];
+              const attributes = [];
+              primaryKeyGroups.push({ PrimaryKeyGroupName: `pg${pgCounter}`, PrimaryValues: primaryAttributes, Attributes: attributes });
+              pgCounter += 1;
+              Object.entries(row).forEach(([key, value]) => {
+                if (primaryKeySet.includes(key)) {
+                  primaryAttributes.push({ Name: key, Value: value });
+                } else {
+                  attributes.push({ Name: key, Value: value });
+                }
+              })
+            });
+
+            const response = {
+              "OperationalDataTableViewTableOutputTransformResponse": primaryKeyGroups,
+              "ShouldUpdate": "true"
+            };
+
+
+            console.log("response", JSON.stringify(response, null, 2));
+            return response;
+          };
+      Environment:
+        Variables:
+          CONNECT_INSTANCE_ARN: !Ref ConnectInstanceArn
+      Timeout: 6
+
+  ConnectLambdaAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt DataTableModulePrimaryKeyGroupsParser.Arn
+
+  ConnectLambdaAssociation2:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt OperationalDataTableListTransform.Arn
+
+  ConnectLambdaAssociation3:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt OperationalDataTablePrimaryValueGroupsMapper.Arn
+
+  ConnectLambdaAssociation4:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt OperationalPatientDataTableWriteTransform.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DataTableModulePrimaryKeyGroupsParser
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+
+  LambdaInvokePermission2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OperationalDataTableListTransform
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+
+  LambdaInvokePermission3:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OperationalDataTablePrimaryValueGroupsMapper
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+
+  LambdaInvokePermission4:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OperationalPatientDataTableWriteTransform
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+
+Outputs:
+  LambdaFunctionArn:
+    Description: 'ARN of the DataTable Module Primary Key Groups Parser Lambda function'
+    Value: !GetAtt DataTableModulePrimaryKeyGroupsParser.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  LambdaFunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref DataTableModulePrimaryKeyGroupsParser
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'
+
+  OperationalDataTableLambdaArn:
+    Description: 'ARN of the Operational DataTable List Transform Lambda function'
+    Value: !GetAtt OperationalDataTableListTransform.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationalDataTableLambdaArn'
+
+  OperationalDataTableLambdaName:
+    Description: 'Name of the Operational DataTable Lambda function'
+    Value: !Ref OperationalDataTableListTransform
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationalDataTableLambdaName'
+
+  ConnectAssociationId:
+    Description: 'Connect Integration Association ID'
+    Value: !Ref ConnectLambdaAssociation
+    Export:
+      Name: !Sub '${AWS::StackName}-ConnectAssociationId'
+
+  ConnectAssociationId2:
+    Description: 'Connect Integration Association ID for Operational DataTable Lambda'
+    Value: !Ref ConnectLambdaAssociation2
+    Export:
+      Name: !Sub '${AWS::StackName}-ConnectAssociationId2'
+
+  PrimaryValueGroupsMapperArn:
+    Description: 'ARN of the Primary Value Groups Mapper Lambda function'
+    Value: !GetAtt OperationalDataTablePrimaryValueGroupsMapper.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-PrimaryValueGroupsMapperArn'
+
+  PrimaryValueGroupsMapperName:
+    Description: 'Name of the Primary Value Groups Mapper Lambda function'
+    Value: !Ref OperationalDataTablePrimaryValueGroupsMapper
+    Export:
+      Name: !Sub '${AWS::StackName}-PrimaryValueGroupsMapperName'
+
+  ConnectAssociationId3:
+    Description: 'Connect Integration Association ID for Primary Value Groups Mapper Lambda'
+    Value: !Ref ConnectLambdaAssociation3
+    Export:
+      Name: !Sub '${AWS::StackName}-ConnectAssociationId3'
+
+  WriteTransformArn:
+    Description: 'ARN of the Write Transform Lambda function'
+    Value: !GetAtt OperationalPatientDataTableWriteTransform.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-WriteTransformArn'
+
+  WriteTransformName:
+    Description: 'Name of the Write Transform Lambda function'
+    Value: !Ref OperationalPatientDataTableWriteTransform
+    Export:
+      Name: !Sub '${AWS::StackName}-WriteTransformName'
+
+  ConnectAssociationId4:
+    Description: 'Connect Integration Association ID for Write Transform Lambda'
+    Value: !Ref ConnectLambdaAssociation4
+    Export:
+      Name: !Sub '${AWS::StackName}-ConnectAssociationId4'

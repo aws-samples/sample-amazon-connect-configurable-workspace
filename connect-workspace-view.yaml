@@ -1,0 +1,53 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create Connect Workspace View using existing custom resource'
+
+Parameters:
+  ConnectInstanceArn:
+    Type: String
+    Description: Amazon Connect Instance ARN
+  
+  ContactFlowArn:
+    Type: String
+    Description: Contact Flow ARN to embed in the workspace view
+    
+  ContactFlowName:
+    Type: String
+    Description: Contact Flow Name to display in the workspace view
+  
+  ViewCreatorFunctionArn:
+    Type: String
+    Description: ARN of the existing View Creator Lambda function
+
+Resources:
+  OperationalWorkspaceView:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref ViewCreatorFunctionArn
+      InstanceId: !Select [1, !Split ['/', !Ref ConnectInstanceArn]]
+      Name: !Sub 
+        - "Workspace View - Operational Data Table-${UUID}"
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Content: !Sub
+        - |
+          {
+            "Actions": [],
+            "Template": "{\"Head\":{\"Configuration\":{\"Layout\":{\"Columns\":[12]}},\"Integrations\":[],\"Title\":\"Workspace View - Operational Data Table\"},\"Body\":[{\"_id\":\"RadioGroup_1764799659225\",\"Type\":\"RadioGroup\",\"Props\":{\"Label\":\"Operational Tables\",\"Name\":\"input-1\",\"DefaultValue\":\"Option 1\",\"Options\":[{\"Label\":\"Operational Patient Data Table\",\"Value\":\"Option 1\"},{\"Label\":\"Operational Patient Data Table (Duplicate)\",\"Value\":\"Option 2\"}],\"Required\":false,\"Disabled\":false},\"Content\":[]},{\"_id\":\"Container_1764799730347\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":{\"Conditions\":[{\"Condition\":{\"NotEquals\":{\"ElementByKey\":\"RadioGroup_1764799659225\",\"ElementByValue\":\"Option 1\"}},\"Result\":false,\"id\":\"0-Container_1764799730347-Visibility\"}],\"Fallback\":true}},\"Content\":[{\"_id\":\"ConnectApplication_1764799749600\",\"Type\":\"ConnectApplication\",\"Props\":{\"ApplicationNamespace\":\"amazon.aws.connect.app.guides\",\"ApplicationProps\":{\"ContactFlowId\":\"${ContactFlowId}\"}},\"Content\":[],\"Configuration\":{\"Style\":{\"--connect-application-height\":\"50rem\"}}}],\"Configuration\":{\"Layout\":{\"Columns\":12}}},{\"_id\":\"Container_1765228824986\",\"Type\":\"Container\",\"Props\":{\"HideBorder\":true,\"Visibility\":{\"Conditions\":[{\"Condition\":{\"NotEquals\":{\"ElementByKey\":\"RadioGroup_1764799659225\",\"ElementByValue\":\"Option 2\"}},\"Result\":false,\"id\":\"0-Container_1765228824986-Visibility\"}],\"Fallback\":true}},\"Content\":[{\"_id\":\"ConnectApplication_1765228831272\",\"Type\":\"ConnectApplication\",\"Props\":{\"ApplicationNamespace\":\"amazon.aws.connect.app.guides\",\"ApplicationProps\":{\"ContactFlowId\":\"${ContactFlowId}\"}},\"Content\":[],\"Configuration\":{\"Style\":{\"--connect-application-height\":\"50rem\"}}}],\"Configuration\":{\"Layout\":{\"Columns\":12}}}]}"
+          }
+        - ContactFlowId: !Ref ContactFlowArn
+
+Outputs:
+  WorkspaceViewId:
+    Description: The ID of the created workspace view
+    Value: !GetAtt OperationalWorkspaceView.ViewId
+  
+  WorkspaceViewArn:
+    Description: The ARN of the created workspace view
+    Value: !GetAtt OperationalWorkspaceView.ViewArn
+    
+  WorkspaceViewName:
+    Description: The name of the created workspace view
+    Value: !Sub 
+      - "Workspace View - Operational Data Table-${UUID}"
+      - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]

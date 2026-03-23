@@ -1,0 +1,323 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Complete infrastructure for Operational Patient Queue Data Table with Lambda functions and flow modules'
+
+Parameters:
+  ConnectInstanceId:
+    Type: String
+    Description: The Amazon Connect Instance ID
+
+Resources:
+
+# Data Table
+  OperationalPatientQueueTable:
+    Type: AWS::Connect::DataTable
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      Name: !Sub 
+        - 'Operational Patient Queue Table-${UUID}'
+        - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+      Description: 'Data table for managing operational patient queue information across different lines of business'
+      TimeZone: 'America/New_York'
+      ValueLockLevel: 'NONE'
+      Status: 'PUBLISHED'
+      Tags:
+        - Key: 'Environment'
+          Value: 'Demo'
+        - Key: 'Purpose'
+          Value: 'Patient Queue Management'
+
+  # Primary Attribute: Line_Of_Business
+  LineOfBusinessAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: OperationalPatientQueueTable
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Line_Of_Business'
+      ValueType: 'TEXT'
+      Primary: true
+      Description: 'Primary attribute for line of business classification'
+      Validation:
+        Enum:
+          Strict: true
+          Values:
+            - 'Primary Care of ABC'
+            - 'ZXC Hospital'
+            - 'Urgent Care of ASD'
+
+  # Primary Attribute: Location
+  LocationAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: LineOfBusinessAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Location'
+      ValueType: 'TEXT'
+      Primary: true
+      Description: 'Location identifier for the patient queue'
+
+  # Data Attribute: Patients_In_Care
+  PatientsInCareAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: LocationAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Patients_In_Care'
+      ValueType: 'NUMBER'
+      Primary: false
+      Description: 'Number of patients currently in care'
+
+  # Data Attribute: Employees_Arrived_Today
+  EmployeesArrivedTodayAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: PatientsInCareAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Employees_Arrived_Today'
+      ValueType: 'NUMBER'
+      Primary: false
+      Description: 'Number of employees who have arrived today'
+
+  # Data Attribute: Employees_Scheduled_Today
+  EmployeesScheduledTodayAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: EmployeesArrivedTodayAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Employees_Scheduled_Today'
+      ValueType: 'NUMBER'
+      Primary: false
+      Description: 'Number of employees scheduled for today'
+
+  # Data Attribute: Locations (Text List)
+  LocationsAttribute:
+    Type: AWS::Connect::DataTableAttribute
+    DependsOn: EmployeesScheduledTodayAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      Name: 'Locations'
+      ValueType: 'TEXT_LIST'
+      Primary: false
+      Description: 'List of available locations'
+
+  # Data Records
+  Record1:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: 
+      - LocationsAttribute
+      - OperationalPatientQueueTable
+      - LineOfBusinessAttribute
+      - LocationAttribute
+      - PatientsInCareAttribute
+      - EmployeesArrivedTodayAttribute
+      - EmployeesScheduledTodayAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Urgent Care of ASD'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVS'
+        Values:
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 12
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 4
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 5
+
+  Record2:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record1
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Primary Care of ABC'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVS'
+        Values:
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 6
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 8
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 18
+
+  Record3:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record2
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Primary Care of ABC'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVE'
+        Values:
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 32
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 15
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 12
+
+  Record4:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record3
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Primary Care of ABC'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'All'
+        Values:
+          - AttributeId: !GetAtt LocationsAttribute.AttributeId
+            AttributeValue: '["WVN", "WVS", "WVE"]'
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 50
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 12
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 15
+
+  Record5:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record4
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Urgent Care of ASD'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVW'
+        Values:
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 3
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 8
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 4
+
+  Record6:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record5
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'ZXC Hospital'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVN'
+        Values:
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 22
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 45
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 25
+
+  Record7:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record6
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Primary Care of ABC'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'WVN'
+        Values:
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 25
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 8
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 10
+
+  Record8:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record7
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'ZXC Hospital'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'All'
+        Values:
+          - AttributeId: !GetAtt LocationsAttribute.AttributeId
+            AttributeValue: '["WVN", "WVS"]'
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 40
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 10
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 13
+
+  Record9:
+    Type: AWS::Connect::DataTableRecord
+    DependsOn: Record8
+    Properties:
+      InstanceArn: !Ref ConnectInstanceId
+      DataTableArn: !GetAtt OperationalPatientQueueTable.Arn
+      DataTableRecord:
+        PrimaryValues:
+          - AttributeId: !GetAtt LineOfBusinessAttribute.AttributeId
+            AttributeValue: 'Urgent Care of ASD'
+          - AttributeId: !GetAtt LocationAttribute.AttributeId
+            AttributeValue: 'All'
+        Values:
+          - AttributeId: !GetAtt LocationsAttribute.AttributeId
+            AttributeValue: '["WVW","WVS"]'
+          - AttributeId: !GetAtt PatientsInCareAttribute.AttributeId
+            AttributeValue: 35
+          - AttributeId: !GetAtt EmployeesArrivedTodayAttribute.AttributeId
+            AttributeValue: 9
+          - AttributeId: !GetAtt EmployeesScheduledTodayAttribute.AttributeId
+            AttributeValue: 12
+
+Outputs:
+  DataTableName:
+    Description: 'Name of the Operational Patient Queue Data Table'
+    Value: !Sub 
+      - 'Operational Patient Queue Table-${UUID}'
+      - UUID: !Select [0, !Split ['-', !Select [2, !Split ['/', !Ref 'AWS::StackId']]]]
+    Export:
+      Name: !Sub '${AWS::StackName}-DataTableName'
+
+  DataTableArn:
+    Description: 'ARN of the Operational Patient Queue Data Table'
+    Value: !GetAtt OperationalPatientQueueTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataTableArn'
+
+  DataTableId:
+    Description: 'ID of the Operational Patient Queue Data Table'
+    Value: !Ref OperationalPatientQueueTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DataTableId'
