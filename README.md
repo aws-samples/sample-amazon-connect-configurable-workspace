@@ -2,6 +2,8 @@
 
 This repository contains CloudFormation templates for deploying a configurable UI solution for Amazon Connect, including data tables, Lambda functions, contact flows, views, and workspaces.
 
+![Datatable View](images/sequence-diagramworkspaces.png)
+
 ## Prerequisites
 
 - AWS Account with appropriate IAM permissions for CloudFormation, Amazon Connect, Lambda, and S3 services
